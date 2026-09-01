@@ -1,0 +1,72 @@
+{
+  "_note": "Sample data used ONLY when DEMO_MODE=true or no API keys are set. The LinkedIn entry mirrors the real Connectora funnel shape; the email entries are illustrative. Real data replaces all of this once keys are configured.",
+  "linkedin": [
+    {
+      "channel": "linkedin",
+      "id": "camp_mtcv6wcmiq4",
+      "name": "CSAFI-B2B-SaaS-US",
+      "status": "running",
+      "running": true,
+      "leads": 2494,
+      "sent": 286,
+      "accepted": 59,
+      "replied": 12,
+      "noReply": 274,
+      "acceptRatePct": 20.6,
+      "replyRatePct": 20.3
+    }
+  ],
+  "email": [
+    {
+      "channel": "email",
+      "id": "demo-email-1",
+      "name": "CSAFI — SaaS Founders US",
+      "status": "running",
+      "running": true,
+      "leads": 1800,
+      "sent": 1200,
+      "accepted": 540,
+      "replied": 96,
+      "noReply": 1104,
+      "acceptRatePct": 45.0,
+      "replyRatePct": 8.0,
+      "bounced": 21,
+      "opportunities": 9,
+      "opportunityValue": 27000
+    },
+    {
+      "channel": "email",
+      "id": "demo-email-2",
+      "name": "CSAFI — Agency Owners UK",
+      "status": "running",
+      "running": true,
+      "leads": 950,
+      "sent": 610,
+      "accepted": 280,
+      "replied": 41,
+      "noReply": 569,
+      "acceptRatePct": 45.9,
+      "replyRatePct": 6.7,
+      "bounced": 9,
+      "opportunities": 4,
+      "opportunityValue": 12000
+    },
+    {
+      "channel": "email",
+      "id": "demo-email-3",
+      "name": "CSAFI — Ecom DTC Brands",
+      "status": "paused",
+      "running": false,
+      "leads": 700,
+      "sent": 700,
+      "accepted": 300,
+      "replied": 33,
+      "noReply": 667,
+      "acceptRatePct": 42.9,
+      "replyRatePct": 4.7,
+      "bounced": 14,
+      "opportunities": 3,
+      "opportunityValue": 9000
+    }
+  ]
+}

@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>CSAFI Outreach Dashboard</title>
+    <style>
+      :root {
+        --bg: #f5f7fb; --card: #fff; --ink: #101828; --muted: #667085; --faint: #98a2b3;
+        --line: #e7ebf3; --track: #eef1f7;
+        --li: #0a66c2; --li-tint: #eaf2fb; --li-tint2: #f5f9ff;
+        --em: #7c3aed; --em-tint: #f1ecfe; --em-tint2: #f8f5ff;
+        --green: #067647; --amber: #b54708; --amber-tint: #fdf1e6; --slate-tint: #eef1f6;
+        --shadow: 0 1px 2px rgba(16,24,40,.05), 0 10px 26px rgba(16,24,40,.05);
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; }
+      body { background: var(--bg); color: var(--ink); font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; -webkit-font-smoothing: antialiased; }
+      .wrap { max-width: 1080px; margin: 0 auto; padding: 28px 20px 70px; }
+
+      .top { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 18px; }
+      .top h1 { margin: 0; font-size: 23px; font-weight: 800; letter-spacing: -0.02em; }
+      .top .tagline { margin: 4px 0 0; color: var(--muted); font-size: 13px; }
+      .controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+      .live { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 12.5px; }
+      .live .pulse { width: 8px; height: 8px; border-radius: 50%; background: #12b76a; box-shadow: 0 0 0 0 rgba(18,183,106,.5); animation: pulse 2s infinite; }
+      @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(18,183,106,.45);} 70% { box-shadow: 0 0 0 7px rgba(18,183,106,0);} 100% { box-shadow: 0 0 0 0 rgba(18,183,106,0);} }
+      .badge-demo { background: var(--amber-tint); color: var(--amber); border: 1px solid #f2ddc4; padding: 3px 10px; border-radius: 999px; font-size: 11.5px; font-weight: 700; }
+      button.refresh { border: 1px solid var(--line); background: var(--card); color: var(--ink); padding: 9px 15px; border-radius: 10px; font-size: 13px; font-weight: 700; cursor: pointer; box-shadow: var(--shadow); }
+      button.refresh:hover { border-color: #cdd5e3; }
+      button.refresh:disabled { opacity: .55; cursor: default; }
+
+      /* date filter */
+      .filterbar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; box-shadow: var(--shadow); margin-bottom: 16px; }
+      .filterbar .lbl { font-size: 12px; font-weight: 700; color: var(--faint); text-transform: uppercase; letter-spacing: .04em; margin-right: 2px; }
+      .preset { border: 1px solid var(--line); background: #fff; color: var(--muted); padding: 7px 13px; border-radius: 999px; font-size: 13px; font-weight: 600; cursor: pointer; }
+      .preset:hover { border-color: #cdd5e3; }
+      .preset.active { background: var(--ink); color: #fff; border-color: var(--ink); }
+      .custom { display: flex; align-items: center; gap: 6px; margin-left: auto; flex-wrap: wrap; }
+      .custom input[type=date] { border: 1px solid var(--line); border-radius: 9px; padding: 7px 10px; font-size: 13px; color: var(--ink); font-family: inherit; }
+      .custom .to { color: var(--faint); font-size: 12.5px; }
+      .custom button { border: 1px solid var(--ink); background: var(--ink); color: #fff; border-radius: 9px; padding: 7px 13px; font-size: 13px; font-weight: 700; cursor: pointer; }
+
+      .statusbar { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 2px 18px; }
+      .stat-pill { display: inline-flex; align-items: center; gap: 7px; background: var(--card); border: 1px solid var(--line); border-radius: 9px; padding: 6px 11px; font-size: 12px; color: var(--muted); box-shadow: var(--shadow); }
+      .stat-pill b { color: var(--ink); font-weight: 700; }
+      .stat-pill .err { color: #b42318; font-weight: 600; }
+      .stat-pill .d { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+      .d.ok { background: #12b76a; } .d.fail { background: #d92d20; } .d.warn { background: var(--amber); } .d.demo { background: var(--faint); }
+
+      /* headline sections */
+      .headline { background: var(--card); border: 1px solid var(--line); border-radius: 20px; box-shadow: var(--shadow); overflow: hidden; margin-bottom: 18px; }
+      .hl-head { display: flex; align-items: center; gap: 13px; padding: 16px 22px; border-bottom: 1px solid var(--line); }
+      .headline.li .hl-head { background: linear-gradient(180deg, var(--li-tint), var(--li-tint2)); }
+      .headline.em .hl-head { background: linear-gradient(180deg, var(--em-tint), var(--em-tint2)); }
+      .chan-ic { width: 40px; height: 40px; border-radius: 11px; display: grid; place-items: center; color: #fff; font-weight: 800; flex: none; }
+      .chan-ic.li { background: var(--li); font-size: 17px; } .chan-ic.em { background: var(--em); }
+      .chan-ic svg { width: 22px; height: 22px; display: block; }
+      .hl-title { display: flex; flex-direction: column; }
+      .hl-title h2 { margin: 0; font-size: 17px; font-weight: 800; letter-spacing: -0.01em; }
+      .hl-title .sub { color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+      .hero { margin-left: auto; color: #fff; border-radius: 999px; padding: 8px 15px; font-size: 13px; font-weight: 700; white-space: nowrap; }
+      .headline.li .hero { background: var(--li); } .headline.em .hero { background: var(--em); }
+      .hero small { font-weight: 600; opacity: .85; }
+
+      .stat-row { display: grid; grid-template-columns: repeat(3, 1fr); }
+      .stat-cell { padding: 22px; border-right: 1px solid var(--line); }
+      .stat-cell:last-child { border-right: none; }
+      .stat-cell .k { font-size: 13px; color: var(--muted); font-weight: 600; }
+      .stat-cell .v { font-size: 40px; font-weight: 800; letter-spacing: -0.03em; line-height: 1.1; margin-top: 6px; }
+      .stat-cell .r { font-size: 12.5px; font-weight: 700; margin-top: 4px; color: var(--faint); }
+      .stat-cell.win .v { color: var(--green); }
+      .hl-note { padding: 11px 22px; border-top: 1px solid var(--line); background: #fbfcfe; color: var(--muted); font-size: 12px; }
+      .hl-note.warn { background: var(--amber-tint); color: var(--amber); }
+      @media (max-width: 560px) { .stat-row { grid-template-columns: 1fr; } .stat-cell { border-right: none; border-bottom: 1px solid var(--line); } .stat-cell:last-child { border-bottom: none; } }
+
+      /* breakdown */
+      details.breakdown { background: var(--card); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); padding: 4px 6px; margin-top: 6px; }
+      details.breakdown > summary { cursor: pointer; padding: 12px 16px; font-weight: 700; font-size: 14px; list-style: none; }
+      details.breakdown > summary::-webkit-details-marker { display: none; }
+      details.breakdown > summary::before { content: "▸ "; color: var(--faint); }
+      details.breakdown[open] > summary::before { content: "▾ "; }
+      .bk { padding: 4px 16px 16px; }
+      .bk h3 { font-size: 12.5px; color: var(--faint); text-transform: uppercase; letter-spacing: .04em; margin: 14px 0 8px; }
+      .row { display: grid; grid-template-columns: 2fr 90px repeat(3, 1fr); gap: 8px; align-items: center; padding: 9px 10px; border: 1px solid var(--line); border-radius: 10px; margin-bottom: 7px; font-size: 13px; }
+      .row.head { border: none; color: var(--faint); font-weight: 700; font-size: 11.5px; text-transform: uppercase; letter-spacing: .03em; padding: 2px 10px; margin-bottom: 2px; }
+      .row .nm { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .row .num { text-align: right; font-weight: 700; }
+      .row .num.win { color: var(--green); }
+      .pill { font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 999px; text-transform: capitalize; justify-self: start; }
+      .pill.running { background: #e7f6ee; color: var(--green); } .pill.paused { background: var(--slate-tint); color: var(--muted); }
+      .pill.completed { background: var(--li-tint); color: var(--li); } .pill.draft { background: var(--slate-tint); color: var(--muted); } .pill.issue { background: var(--amber-tint); color: var(--amber); }
+
+      .note { border: 1px dashed #cbd5e1; border-radius: 12px; padding: 16px; color: var(--muted); font-size: 13.5px; }
+      .note b { color: var(--ink); } .note code { background: var(--slate-tint); padding: 2px 6px; border-radius: 6px; }
+      .skeleton { color: var(--muted); padding: 40px 4px; text-align: center; }
+      footer.foot { color: var(--faint); font-size: 12px; text-align: center; margin-top: 12px; }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="top">
+        <div>
+          <h1>CSAFI Outreach Dashboard</h1>
+          <p class="tagline">LinkedIn &amp; email performance — pick a date range below.</p>
+        </div>
+        <div class="controls">
+          <span id="demoBadge" class="badge-demo" style="display:none">Sample data</span>
+          <span class="live"><span class="pulse"></span><span id="updated">connecting…</span></span>
+          <button id="refreshBtn" class="refresh">↻ Refresh</button>
+        </div>
+      </div>
+
+      <div class="filterbar">
+        <span class="lbl">Period</span>
+        <button class="preset" data-preset="all">All time</button>
+        <button class="preset" data-preset="7d">Last 7 days</button>
+        <button class="preset" data-preset="30d">Last 30 days</button>
+        <button class="preset" data-preset="month">This month</button>
+        <span class="custom">
+          <input type="date" id="from" aria-label="From date" />
+          <span class="to">to</span>
+          <input type="date" id="to" aria-label="To date" />
+          <button id="applyCustom">Apply</button>
+        </span>
+      </div>
+
+      <div id="status" class="statusbar"></div>
+
+      <div id="content"><div class="skeleton">Loading…</div></div>
+
+      <footer class="foot">CSAFI · live from Connectora (LinkedIn) &amp; Instantly (email) · keys stay on the server</footer>
+    </div>
+
+    <script>
+      const fmt = (n) => (Number(n) || 0).toLocaleString("en-US");
+      const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
+      const ENVELOPE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>';
+
+      const CH = {
+        linkedin: { cls: "li", title: "LinkedIn Outreach", icon: '<span class="chan-ic li">in</span>', k1: "Requests sent", k2: "Accepted", k3: "Replied", accWord: "accepted", key: "CONNECTORA_API_KEY" },
+        email: { cls: "em", title: "Email Outreach", icon: '<span class="chan-ic em">' + ENVELOPE + "</span>", k1: "Emails sent", k2: "Opened", k3: "Replied", accWord: "open rate", key: "INSTANTLY_API_KEY" },
+      };
+
+      let state = { preset: "all", start: null, end: null }; // current range selection
+
+      function statusClass(s) { return ["running","paused","completed","draft"].includes(s) ? s : "issue"; }
+      function pillClass(s) { return ["running","paused","completed","draft"].includes(s) ? s : "issue"; }
+
+      function headline(channelKey, data, range) {
+        const ch = CH[channelKey];
+        const t = data.totals || {};
+        let inner, note = "";
+        if (!data.configured) {
+          inner = `<div style="padding:20px"><div class="note"><b>${ch.title} not connected.</b> Add <code>${ch.key}</code> in Railway, then Refresh.</div></div>`;
+        } else if (!data.ok) {
+          inner = `<div style="padding:20px"><div class="note"><b>Couldn't load ${ch.title}.</b> ${esc(data.error || "error")}</div></div>`;
+        } else {
+          inner = `
+            <div class="stat-row">
+              <div class="stat-cell"><div class="k">${ch.k1}</div><div class="v">${fmt(t.sent)}</div></div>
+              <div class="stat-cell"><div class="k">${ch.k2}</div><div class="v">${fmt(t.accepted)}</div><div class="r">${t.acceptRatePct}% ${ch.accWord}</div></div>
+              <div class="stat-cell win"><div class="k">${ch.k3}</div><div class="v">${fmt(t.replied)}</div><div class="r" style="color:var(--green)">${t.replyRatePct}% reply rate</div></div>
+            </div>`;
+          // LinkedIn date-mode note
+          if (channelKey === "linkedin") {
+            const m = data.meta || {};
+            if (m.mode === "range") {
+              note = `<div class="hl-note">Showing <b>${esc(range.label)}</b>${m.historySince ? ` · history captured since ${esc(m.historySince)}` : ""}.</div>`;
+            } else if (!range.all) {
+              note = `<div class="hl-note warn">Date filter applies to email. LinkedIn shows <b>lifetime</b> totals${m.dbEnabled ? "" : " — add a database (DATABASE_URL) to filter LinkedIn by date"}.</div>`;
+            } else {
+              note = `<div class="hl-note">Lifetime totals.</div>`;
+            }
+          } else if (!range.all) {
+            note = `<div class="hl-note">Showing <b>${esc(range.label)}</b>.</div>`;
+          }
+        }
+        const hero = (data.ok && data.configured)
+          ? `<span class="hero">${fmt(t.replied)} replies <small>· ${t.replyRatePct}%</small></span>` : "";
+        return `
+          <section class="headline ${ch.cls}">
+            <div class="hl-head">${ch.icon}<div class="hl-title"><h2>${ch.title}</h2><div class="sub">${data.ok && data.configured ? `${fmt(t.campaigns)} campaign${t.campaigns===1?"":"s"} · ${fmt(t.running)} running` : "&nbsp;"}</div></div>${hero}</div>
+            ${inner}${note}
+          </section>`;
+      }
+
+      function bkRows(channelKey, data) {
+        const ch = CH[channelKey];
+        if (!data.ok || !data.campaigns.length) return `<div class="note" style="border-style:dashed">No ${ch.title.toLowerCase()} campaigns in this period.</div>`;
+        const head = `<div class="row head"><span>Campaign</span><span>Status</span><span class="num">${ch.k1}</span><span class="num">${ch.k2}</span><span class="num">Replied</span></div>`;
+        const rows = data.campaigns.map((c) => `
+          <div class="row">
+            <span class="nm" title="${esc(c.name)}">${esc(c.name)}</span>
+            <span class="pill ${pillClass(c.status)}">${esc(c.status)}</span>
+            <span class="num">${fmt(c.sent)}</span>
+            <span class="num">${fmt(c.accepted)}</span>
+            <span class="num win">${fmt(c.replied)}</span>
+          </div>`).join("");
+        return head + rows;
+      }
+
+      function statusPill(name, data) {
+        const m = data.meta || {};
+        let dot = "demo", text = "";
+        if (m.source === "not-configured") { dot = "warn"; text = "not connected"; }
+        else if (m.source === "demo") { dot = "demo"; text = "sample data"; }
+        else if (data.ok) { const n = data.campaigns.length; text = `<b>${m.httpStatus}</b> · ${m.durationMs} ms · ${n} campaign${n===1?"":"s"}`; }
+        else { dot = "fail"; text = `<span class="err">${m.httpStatus ? m.httpStatus + " " : ""}${esc(data.error || "error")}</span>`; }
+        return `<span class="stat-pill"><span class="d ${dot}"></span><b>${name}</b> — ${text}</span>`;
+      }
+
+      function markActivePreset() {
+        document.querySelectorAll(".preset").forEach((b) => b.classList.toggle("active", state.preset === b.dataset.preset));
+      }
+
+      let loading = false;
+      async function load() {
+        if (loading) return;
+        loading = true;
+        const btn = document.getElementById("refreshBtn");
+        btn.disabled = true; btn.textContent = "↻ Refreshing…";
+        try {
+          const qs = state.preset ? `preset=${state.preset}` : `start=${state.start}&end=${state.end}`;
+          const res = await fetch(`/api/data?${qs}`, { cache: "no-store" });
+          const p = await res.json();
+          if (p.error) throw new Error(p.error);
+
+          document.getElementById("demoBadge").style.display = p.demo ? "inline-block" : "none";
+          const d = new Date(p.generatedAt);
+          document.getElementById("updated").textContent = "Live as of " + d.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+
+          document.getElementById("status").innerHTML = statusPill("LinkedIn API", p.linkedin) + statusPill("Email API", p.email);
+          document.getElementById("content").innerHTML =
+            headline("linkedin", p.linkedin, p.range) +
+            headline("email", p.email, p.range) +
+            `<details class="breakdown"><summary>Campaign breakdown</summary><div class="bk">
+               <h3>LinkedIn</h3>${bkRows("linkedin", p.linkedin)}
+               <h3>Email</h3>${bkRows("email", p.email)}
+             </div></details>`;
+        } catch (err) {
+          document.getElementById("content").innerHTML = `<div class="note"><b>Could not load the dashboard.</b> ${esc(err.message || err)}</div>`;
+        } finally {
+          loading = false; btn.disabled = false; btn.textContent = "↻ Refresh";
+        }
+      }
+
+      // date filter events
+      document.querySelectorAll(".preset").forEach((b) => b.addEventListener("click", () => {
+        state = { preset: b.dataset.preset, start: null, end: null };
+        document.getElementById("from").value = ""; document.getElementById("to").value = "";
+        markActivePreset(); load();
+      }));
+      document.getElementById("applyCustom").addEventListener("click", () => {
+        const from = document.getElementById("from").value, to = document.getElementById("to").value;
+        if (!from || !to) { alert("Pick both a From and To date."); return; }
+        state = { preset: null, start: from, end: to };
+        markActivePreset(); load();
+      });
+      document.getElementById("refreshBtn").addEventListener("click", load);
+
+      markActivePreset();
+      load();
+      setInterval(load, 60000);
+    </script>
+  </body>
+</html>
