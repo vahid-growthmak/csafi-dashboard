@@ -34,6 +34,33 @@ Change the keyword any time with the `CAMPAIGN_FILTER` variable.
 
 ---
 
+## Webinar bookings (HubSpot, read directly)
+
+The **Webinar Bookings** section (top of the page) reads your HubSpot webinar-form
+submissions **directly from HubSpot** on every refresh — the same way the dashboard
+reads Connectora and Instantly. No n8n or database step is needed for bookings; each
+submission carries its own `submittedAt`, so bookings filter by date natively, and the
+form values give the registrant's **name + email**.
+
+**Railway variables:**
+- `HUBSPOT_TOKEN` — a HubSpot **private-app token** with the **`forms`** scope
+  (HubSpot → Settings → Integrations → Private Apps → Create → add the `forms` scope →
+  copy the token, starts with `pat-`).
+- `HUBSPOT_FORMS` — the webinar forms to read, as JSON mapping each **form GUID** to a
+  display name, e.g. `{"f0fe96d8-449a-4768-975b-6fa539b56466":"IT Webinar","<guid2>":"Executive Webinar"}`.
+  (The GUID is the `sourceId` you saw in the webhook, or the form's ID in HubSpot →
+  Marketing → Forms.)
+- `BOOKING_LINK` — the webinar URL to display on the card.
+
+Endpoint used (read-only): `GET /form-integrations/v1/submissions/forms/{guid}` — paged
+50 at a time, newest first; for a date range it stops paging once it passes the start.
+
+> Note: this counts every **form submission**, so it captures both new and existing
+> HubSpot contacts. (An optional n8n → `POST /api/booking` push path is still built in
+> as a fallback — set `BOOKING_TOKEN` + `DATABASE_URL` instead of the HubSpot vars.)
+
+---
+
 ## Deploy on Railway
 
 ### 1. Deploy the app

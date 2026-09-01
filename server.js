@@ -49,6 +49,19 @@ const INSTANTLY_BASE = process.env.INSTANTLY_BASE || "https://api.instantly.ai/a
 const CAMPAIGN_FILTER = (process.env.CAMPAIGN_FILTER || "CSAFI").trim().toLowerCase();
 const SNAPSHOT_TOKEN = process.env.SNAPSHOT_TOKEN || "";
 const DATABASE_URL = process.env.DATABASE_URL || "";
+// HubSpot / bookings
+const BOOKING_LINK = process.env.BOOKING_LINK || "";            // the webinar booking URL to display
+// --- Direct HubSpot pull (dashboard fetches bookings itself, like Connectora/Instantly) ---
+const HUBSPOT_TOKEN = process.env.HUBSPOT_TOKEN || "";          // private-app token (scope: forms)
+const HUBSPOT_BASE = process.env.HUBSPOT_BASE || "https://api.hubapi.com";
+// Which webinar forms to read, as JSON { "<form-guid>": "Webinar name", ... }
+let HUBSPOT_FORMS = {};
+try { HUBSPOT_FORMS = JSON.parse(process.env.HUBSPOT_FORMS || "{}"); } catch { HUBSPOT_FORMS = {}; }
+const HUBSPOT_ENABLED = !!HUBSPOT_TOKEN && Object.keys(HUBSPOT_FORMS).length > 0;
+// --- Optional n8n push path (kept as a fallback) ---
+const BOOKING_TOKEN = process.env.BOOKING_TOKEN || "";          // shared secret n8n must send
+let WEBINAR_LABELS = {};
+try { WEBINAR_LABELS = JSON.parse(process.env.WEBINAR_LABELS || "{}"); } catch { WEBINAR_LABELS = {}; }
 
 const DEMO_MODE =
   String(process.env.DEMO_MODE).toLowerCase() === "true" ||
@@ -80,7 +93,20 @@ async function ensureSchema() {
       PRIMARY KEY (snapshot_date, campaign_id)
     );
   `);
-  console.log("  db: linkedin_snapshots ready");
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS bookings (
+      booking_id  TEXT PRIMARY KEY,
+      contact_id  TEXT,
+      email       TEXT,
+      name        TEXT,
+      form_id     TEXT,
+      webinar     TEXT,
+      booked_at   TIMESTAMPTZ NOT NULL,
+      created_at  TIMESTAMPTZ DEFAULT now()
+    );
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS bookings_booked_at_idx ON bookings (booked_at);`);
+  console.log("  db: linkedin_snapshots + bookings ready");
 }
 
 // ---------- helpers ----------
@@ -304,6 +330,122 @@ function totalsFor(campaigns, channel) {
   return t;
 }
 
+// ---------- Bookings (HubSpot via n8n) ----------
+// Record one booking. Accepts our clean shape OR a raw HubSpot webhook event
+// ({objectId, occurredAt, sourceId, eventId}). name/email only present if n8n
+// enriched the contact first.
+async function recordBooking(b) {
+  if (!pool) throw new Error("no database");
+  const rawAt = b.booked_at ?? b.occurredAt;
+  let bookedAt;
+  if (rawAt == null) bookedAt = new Date();
+  else if (typeof rawAt === "number") bookedAt = new Date(rawAt);
+  else if (/^\d+$/.test(String(rawAt))) bookedAt = new Date(Number(rawAt));
+  else bookedAt = new Date(rawAt);
+  if (isNaN(bookedAt.getTime())) bookedAt = new Date();
+
+  const formId = b.form_id || b.sourceId || null;
+  const contactId = b.contact_id || b.objectId || null;
+  const bookingId = String(b.booking_id || b.eventId || contactId || `${formId || "form"}-${b.email || Date.now()}`);
+  const webinar = b.webinar || (formId && WEBINAR_LABELS[formId]) || null;
+
+  await pool.query(
+    `INSERT INTO bookings (booking_id, contact_id, email, name, form_id, webinar, booked_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7)
+     ON CONFLICT (booking_id) DO UPDATE SET
+       contact_id = EXCLUDED.contact_id,
+       email   = COALESCE(EXCLUDED.email,   bookings.email),
+       name    = COALESCE(EXCLUDED.name,    bookings.name),
+       form_id = COALESCE(EXCLUDED.form_id, bookings.form_id),
+       webinar = COALESCE(EXCLUDED.webinar, bookings.webinar),
+       booked_at = EXCLUDED.booked_at;`,
+    [bookingId, contactId, b.email || null, b.name || null, formId, webinar, bookedAt.toISOString()]
+  );
+  return { bookingId, bookedAt: bookedAt.toISOString(), webinar };
+}
+
+async function getBookings(range) {
+  if (!pool) return { ok: true, configured: false, total: 0, perWebinar: [], recent: [], meta: { source: "no-db", bookingLink: BOOKING_LINK } };
+  const where = range.all ? "" : "WHERE booked_at >= $1::date AND booked_at < ($2::date + INTERVAL '1 day')";
+  const params = range.all ? [] : [range.start, range.end];
+  const [totalQ, perQ, recentQ, firstQ] = await Promise.all([
+    pool.query(`SELECT COUNT(*)::int AS n FROM bookings ${where}`, params),
+    pool.query(`SELECT COALESCE(webinar, form_id, 'Unknown') AS webinar, COUNT(*)::int AS n FROM bookings ${where} GROUP BY 1 ORDER BY n DESC`, params),
+    pool.query(`SELECT name, email, COALESCE(webinar, form_id) AS webinar, booked_at FROM bookings ${where} ORDER BY booked_at DESC LIMIT 8`, params),
+    pool.query(`SELECT MIN(booked_at) AS d FROM bookings`),
+  ]);
+  return {
+    ok: true, configured: true,
+    total: totalQ.rows[0].n,
+    perWebinar: perQ.rows.map((r) => ({ webinar: r.webinar, count: r.n })),
+    recent: recentQ.rows.map((r) => ({ name: r.name, email: r.email, webinar: r.webinar, bookedAt: r.booked_at })),
+    meta: { source: "db", since: firstQ.rows[0]?.d ? new Date(firstQ.rows[0].d).toISOString() : null, bookingLink: BOOKING_LINK },
+  };
+}
+
+// --- Direct HubSpot: read webinar-form submissions (bookings) ---
+function fieldVal(values, name) {
+  if (!Array.isArray(values)) return null;
+  const f = values.find((v) => String(v.name).toLowerCase() === name);
+  return f ? f.value : null;
+}
+function nameFromValues(values) {
+  const first = fieldVal(values, "firstname") || fieldVal(values, "first_name");
+  const last = fieldVal(values, "lastname") || fieldVal(values, "last_name");
+  const full = [first, last].filter(Boolean).join(" ").trim();
+  return full || fieldVal(values, "fullname") || fieldVal(values, "name") || null;
+}
+// An IST calendar date (YYYY-MM-DD) -> UTC ms boundary.
+function istMs(dateStr, endOfDay) {
+  return Date.parse(`${dateStr}T${endOfDay ? "23:59:59.999" : "00:00:00.000"}+05:30`);
+}
+async function fetchFormSubmissions(guid, stopBeforeMs) {
+  const out = [];
+  let after = null;
+  for (let page = 0; page < 60; page++) {          // safety cap: 60 * 50 = 3000
+    const url = `${HUBSPOT_BASE}/form-integrations/v1/submissions/forms/${guid}?limit=50${after ? `&after=${encodeURIComponent(after)}` : ""}`;
+    const r = await callUpstream("HubSpot", url, { Authorization: `Bearer ${HUBSPOT_TOKEN}`, Accept: "application/json" });
+    if (!r.ok) return { ok: false, error: r.error, status: r.status, durationMs: r.durationMs, submissions: out };
+    const results = Array.isArray(r.body?.results) ? r.body.results : [];
+    let reachedOld = false;
+    for (const s of results) {
+      const at = Number(s.submittedAt || 0);
+      out.push({ at, email: fieldVal(s.values, "email"), name: nameFromValues(s.values), guid });
+      if (stopBeforeMs && at < stopBeforeMs) reachedOld = true;   // newest-first: older pages can stop
+    }
+    after = r.body?.paging?.next?.after || null;
+    if (!after || reachedOld) break;
+  }
+  return { ok: true, submissions: out };
+}
+async function getBookingsFromHubSpot(range) {
+  const forms = Object.entries(HUBSPOT_FORMS);       // [[guid, name], ...]
+  const startMs = range.all ? null : istMs(range.start, false);
+  const endMs = range.all ? null : istMs(range.end, true);
+  const t0 = Date.now();
+  let all = [];
+  for (const [guid] of forms) {
+    const r = await fetchFormSubmissions(guid, startMs);
+    if (!r.ok) return { ok: false, configured: true, error: r.error, total: 0, perWebinar: [], recent: [], meta: { source: "hubspot", httpStatus: r.status, durationMs: r.durationMs, bookingLink: BOOKING_LINK } };
+    all = all.concat(r.submissions);
+  }
+  const inRange = all.filter((s) => range.all || (s.at >= startMs && s.at <= endMs));
+  const byForm = {};
+  for (const s of inRange) { const label = HUBSPOT_FORMS[s.guid] || s.guid; byForm[label] = (byForm[label] || 0) + 1; }
+  const perWebinar = Object.entries(byForm).map(([webinar, count]) => ({ webinar, count })).sort((a, b) => b.count - a.count);
+  const recent = inRange.sort((a, b) => b.at - a.at).slice(0, 8)
+    .map((s) => ({ name: s.name, email: s.email, webinar: HUBSPOT_FORMS[s.guid] || s.guid, bookedAt: new Date(s.at).toISOString() }));
+  console.log(`     HubSpot: ${inRange.length} booking(s) across ${forms.length} form(s)`);
+  return { ok: true, configured: true, total: inRange.length, perWebinar, recent, meta: { source: "hubspot", httpStatus: 200, durationMs: Date.now() - t0, bookingLink: BOOKING_LINK } };
+}
+
+// Pick the booking source: HubSpot API (preferred) → n8n/DB → not configured.
+async function getBookingsForRange(range) {
+  if (HUBSPOT_ENABLED) return getBookingsFromHubSpot(range);
+  if (pool) return getBookings(range);
+  return { ok: true, configured: false, total: 0, perWebinar: [], recent: [], meta: { source: "none", bookingLink: BOOKING_LINK } };
+}
+
 // ---------- routes ----------
 app.get("/api/data", async (req, res) => {
   res.set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
@@ -319,16 +461,27 @@ app.get("/api/data", async (req, res) => {
       const meta = { source: "demo" };
       const li = { ok: true, configured: true, campaigns: sample.linkedin, meta: { ...meta, mode: "lifetime" } };
       const em = { ok: true, configured: true, campaigns: sample.email, meta };
+      const bookings = {
+        ok: true, configured: true, total: 14,
+        perWebinar: [{ webinar: "IT Webinar", count: 5 }, { webinar: "Executive Webinar", count: 4 }, { webinar: "Operators Webinar", count: 3 }, { webinar: "Food-safety Webinar", count: 2 }],
+        recent: [
+          { name: "Jane Cooper", email: "jane.cooper@acme.io", webinar: "Executive Webinar", bookedAt: new Date(Date.now() - 36e5).toISOString() },
+          { name: "Marcus Reyes", email: "m.reyes@northplant.com", webinar: "Operators Webinar", bookedAt: new Date(Date.now() - 9e6).toISOString() },
+          { name: "Priya Nair", email: "priya@safefoods.co", webinar: "Food-safety Webinar", bookedAt: new Date(Date.now() - 173e5).toISOString() },
+        ],
+        meta: { source: "demo", bookingLink: BOOKING_LINK || "https://share.hsforms.com/your-webinar-form" },
+      };
       console.log("  (serving sample data)");
       return res.json({
         generatedAt: new Date().toISOString(), demo: true, range,
+        bookings,
         linkedin: { ...li, totals: totalsFor(li.campaigns, "linkedin") },
         email: { ...em, totals: totalsFor(em.campaigns, "email") },
       });
     }
 
-    // Fetch LinkedIn live + email (in parallel)
-    const [live, email] = await Promise.all([getConnectoraLive(), getEmail(range)]);
+    // Fetch LinkedIn live + email + bookings (in parallel)
+    const [live, email, bookings] = await Promise.all([getConnectoraLive(), getEmail(range), getBookingsForRange(range)]);
 
     // keep today's snapshot fresh (also seeds history)
     if (pool && live.ok) { try { await writeSnapshot(live.rows); } catch (e) { console.log("  ! snapshot write failed:", e.message); } }
@@ -347,9 +500,10 @@ app.get("/api/data", async (req, res) => {
       };
     }
 
-    console.log(`  = done in ${Date.now() - reqStart}ms  ·  LinkedIn ${linkedin.ok ? "OK" : "FAIL"} (${linkedin.meta.mode || "-"}) / Email ${email.ok ? "OK" : "FAIL"}`);
+    console.log(`  = done in ${Date.now() - reqStart}ms  ·  LinkedIn ${linkedin.ok ? "OK" : "FAIL"} (${linkedin.meta.mode || "-"}) / Email ${email.ok ? "OK" : "FAIL"} / Bookings ${bookings.total}`);
     res.json({
       generatedAt: new Date().toISOString(), demo: false, range,
+      bookings,
       linkedin: { ...linkedin, totals: totalsFor(linkedin.campaigns, "linkedin") },
       email: { ...email, totals: totalsFor(email.campaigns, "email") },
     });
@@ -370,6 +524,26 @@ app.post("/api/snapshot", async (req, res) => {
     await snapshotJob();
     res.json({ ok: true, date: istToday() });
   } catch (err) {
+    res.status(500).json({ error: String(err.message || err) });
+  }
+});
+
+// Receive a booking from n8n (HubSpot form submission). Protect with BOOKING_TOKEN.
+// Accepts one object, an array, or a raw HubSpot webhook body {body:[...]}.
+app.post("/api/booking", async (req, res) => {
+  if (BOOKING_TOKEN && req.get("x-booking-token") !== BOOKING_TOKEN) {
+    return res.status(401).json({ error: "bad token" });
+  }
+  if (!pool) return res.status(400).json({ error: "no DATABASE_URL — bookings disabled" });
+  try {
+    const p = req.body || {};
+    const items = Array.isArray(p) ? p : Array.isArray(p.body) ? p.body : [p];
+    const out = [];
+    for (const it of items) out.push(await recordBooking(it));
+    console.log(`\n[${new Date().toISOString()}] /api/booking  <- recorded ${out.length} booking(s)`);
+    res.json({ ok: true, recorded: out.length, bookings: out });
+  } catch (err) {
+    console.log("  ! /api/booking error:", err.message);
     res.status(500).json({ error: String(err.message || err) });
   }
 });
