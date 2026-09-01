@@ -548,7 +548,11 @@ app.post("/api/booking", async (req, res) => {
   }
 });
 
-app.get("/healthz", (req, res) => res.json({ ok: true, db: !!pool }));
+app.get("/healthz", (req, res) => res.json({
+  ok: true,
+  db: !!pool,
+  hubspot: { tokenSet: !!HUBSPOT_TOKEN, forms: Object.keys(HUBSPOT_FORMS).length, enabled: HUBSPOT_ENABLED },
+}));
 app.use(express.static(path.join(__dirname, "public")));
 
 (async () => {
@@ -557,6 +561,9 @@ app.use(express.static(path.join(__dirname, "public")));
     console.log(`CSAFI dashboard on port ${PORT}`);
     console.log(`  Connectora key: ${CONNECTORA_API_KEY ? "set" : "MISSING"}  ·  Instantly key: ${INSTANTLY_API_KEY ? "set" : "MISSING"}`);
     console.log(`  Postgres: ${pool ? "connected (LinkedIn history ON)" : "none (LinkedIn lifetime only)"}  ·  filter: "${CAMPAIGN_FILTER}"  ·  demo: ${DEMO_MODE ? "ON" : "off"}`);
+    console.log(`  HubSpot bookings: ${HUBSPOT_ENABLED
+      ? `ON (${Object.keys(HUBSPOT_FORMS).length} form(s))`
+      : `OFF — token ${HUBSPOT_TOKEN ? "set" : "MISSING"}, HUBSPOT_FORMS parsed to ${Object.keys(HUBSPOT_FORMS).length} form(s)`}`);
   });
   // background snapshots so history accrues even if nobody opens the page
   if (pool) {
