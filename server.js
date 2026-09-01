@@ -180,15 +180,25 @@ function normalizeConnectoraLive(overview) {
     .filter((c) => includeCampaign(c.name))
     .map((c) => {
       const f = c.funnel || {};
+      // Connectora's funnel is DISJOINT current states: inviteSent = still pending,
+      // connected = accepted, replied = replied. To match Connectora's own dashboard
+      // ("total ever invited"), roll the funnel up cumulatively:
+      //   accepted = everyone who accepted (connected + replied + completed)
+      //   sent     = everyone ever invited (still-pending invites + accepted)
+      const inviteSent = Number(f.inviteSent || 0);
+      const connected = Number(f.connected || 0);
+      const replied = Number(f.replied || 0);
+      const completed = Number(f.completed || 0);
+      const accepted = connected + replied + completed;
       return {
         channel: "linkedin",
         id: c.id,
         name: c.name || "(unnamed campaign)",
         status: String(c.status || "unknown").toLowerCase(),
         leads: Number(f.total || 0),
-        sent: Number(f.inviteSent || 0),
-        accepted: Number(f.connected || 0),
-        replied: Number(f.replied || 0),
+        sent: inviteSent + accepted,
+        accepted,
+        replied,
       };
     });
 }
@@ -233,6 +243,7 @@ async function getLinkedInRange(range, liveRows) {
     const campaigns = (liveRows || []).map((c) => finishLinkedIn(c.name, c.status, c.leads, c.sent, c.accepted, c.replied, c.id));
     return { mode: "lifetime", campaigns, historySince: null };
   }
+  try {
   const { rows } = await pool.query(
     `
     WITH end_snap AS (
@@ -259,6 +270,11 @@ async function getLinkedInRange(range, liveRows) {
   const min = await pool.query(`SELECT MIN(snapshot_date) AS d FROM linkedin_snapshots`);
   const historySince = min.rows[0]?.d ? new Date(min.rows[0].d).toISOString().slice(0, 10) : null;
   return { mode: "range", campaigns, historySince };
+  } catch (e) {
+    console.log("  ! LinkedIn range query failed — showing lifetime instead:", e.message);
+    const campaigns = (liveRows || []).map((c) => finishLinkedIn(c.name, c.status, c.leads, c.sent, c.accepted, c.replied, c.id));
+    return { mode: "lifetime", campaigns, historySince: null };
+  }
 }
 
 function finishLinkedIn(name, status, leads, sent, accepted, replied, id) {
@@ -368,6 +384,7 @@ async function getBookings(range) {
   if (!pool) return { ok: true, configured: false, total: 0, perWebinar: [], recent: [], meta: { source: "no-db", bookingLink: BOOKING_LINK } };
   const where = range.all ? "" : "WHERE booked_at >= $1::date AND booked_at < ($2::date + INTERVAL '1 day')";
   const params = range.all ? [] : [range.start, range.end];
+  try {
   const [totalQ, perQ, recentQ, firstQ] = await Promise.all([
     pool.query(`SELECT COUNT(*)::int AS n FROM bookings ${where}`, params),
     pool.query(`SELECT COALESCE(webinar, form_id, 'Unknown') AS webinar, COUNT(*)::int AS n FROM bookings ${where} GROUP BY 1 ORDER BY n DESC`, params),
@@ -381,6 +398,10 @@ async function getBookings(range) {
     recent: recentQ.rows.map((r) => ({ name: r.name, email: r.email, webinar: r.webinar, bookedAt: r.booked_at })),
     meta: { source: "db", since: firstQ.rows[0]?.d ? new Date(firstQ.rows[0].d).toISOString() : null, bookingLink: BOOKING_LINK },
   };
+  } catch (e) {
+    console.log("  ! bookings DB query failed:", e.message);
+    return { ok: false, configured: true, error: "database unavailable", total: 0, perWebinar: [], recent: [], meta: { source: "db", bookingLink: BOOKING_LINK } };
+  }
 }
 
 // --- Direct HubSpot: read webinar-form submissions (bookings) ---
