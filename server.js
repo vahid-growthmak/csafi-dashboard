@@ -548,6 +548,29 @@ app.post("/api/booking", async (req, res) => {
   }
 });
 
+// Helper: list all HubSpot forms (id + name) so you can pick the webinar ones for HUBSPOT_FORMS.
+app.get("/api/hubspot-forms", async (req, res) => {
+  res.set("Cache-Control", "no-store");
+  if (!HUBSPOT_TOKEN) return res.status(400).json({ error: "HUBSPOT_TOKEN not set" });
+  try {
+    let after = null, all = [];
+    for (let i = 0; i < 20; i++) {
+      const url = `${HUBSPOT_BASE}/marketing/v3/forms?limit=100${after ? `&after=${encodeURIComponent(after)}` : ""}`;
+      const r = await callUpstream("HubSpot", url, { Authorization: `Bearer ${HUBSPOT_TOKEN}`, Accept: "application/json" });
+      if (!r.ok) return res.status(r.status || 500).json({ error: r.error });
+      all = all.concat((r.body?.results || []).map((f) => ({ id: f.id, name: f.name })));
+      after = r.body?.paging?.next?.after || null;
+      if (!after) break;
+    }
+    // Build a ready-to-paste HUBSPOT_FORMS value from every form
+    const suggested = {};
+    for (const f of all) suggested[f.id] = f.name;
+    res.json({ count: all.length, forms: all, suggestedHubspotForms: JSON.stringify(suggested) });
+  } catch (e) {
+    res.status(500).json({ error: String(e.message || e) });
+  }
+});
+
 app.get("/healthz", (req, res) => res.json({
   ok: true,
   db: !!pool,
